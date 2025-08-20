@@ -350,7 +350,7 @@ def main():
         # Update food display
         map = np.zeros((WIDTH, HEIGHT, 3), dtype=np.uint8)
         map[:, :, 0] = 50*find_food  # Red channel
-        map[:, :, 1] = 250*food  # Green channel
+        map[:, :, 1] = 50*food  # Green channel
         map[:, :, 2] = 50*find_nest  # Blue channel
         surf = pygame.surfarray.make_surface(map) 
 
