@@ -17,7 +17,7 @@ WIDTH, HEIGHT = 600, 600
 
 # Food definitions
 FOOD_CLUSTER = 10
-FOOD_CLUSTER_RADIUS = 10
+FOOD_CLUSTER_RADIUS = 5
 FOOD_COUNT = 100
 
 
@@ -27,12 +27,13 @@ ANT_SIZE = 2
 ANT_SPEED = 1
 ANT_FIND_FOOD_RADIUS = 10
 ANT_FIND_NEST_RADIUS = 10
-ANT_FOLLOW_SCENT_RADIUS = 3
+ANT_FOLLOW_SCENT_RADIUS = 5
 ANT_FORAGING_RANGE = 250
 ANT_FOOD_COST = 10
-ANT_MAX_TURN_ANGLE = 5  # degrees
+ANT_MAX_TURN_ANGLE = 30  # degrees
 
-SCENT_THRESHOLD = 0.001  # Threshold for scent detection
+SCENT_THRESHOLD = 0.01  # Threshold for scent detection
+SCENT_HALFLIFE = 100  # Decay rate for scent markers
 
 class STATE(Enum):
     AT_NEST = 0
@@ -117,11 +118,12 @@ class Ant:
         fy1 = min(fy0 + 1, HEIGHT - 1)
         dx = self.x - fx0
         dy = self.y - fy0
-        A00 = dx * dy
-        A01 = dx * (1 - dy)
-        A10 = (1 - dx) * dy
-        A11 = (1 - dx) * (1 - dy)
-
+        # weight the scent marker trail lay on four matrix cells near the ant
+        A00 = (1 - dx) * (1 - dy)
+        A01 = (1 - dx) * dy
+        A10 = dx * (1 - dy)
+        A11 = dx * dy
+        
         match self.state:
             case STATE.FORAGING:
                 if self.foraging_timer > 0:
@@ -133,7 +135,7 @@ class Ant:
                 if self.food > 0 and self.return_to_nest_timer > 0:
                     multipler = 1
                 else:
-                    multipler = 0
+                    multipler = -1
                 find_food[fx0,fy0] = max(0, find_food[fx0,fy0] + multipler * A00)
                 find_food[fx0,fy1] = max(0, find_food[fx0,fy1] + multipler * A01)
                 find_food[fx1,fy0] = max(0, find_food[fx1,fy0] + multipler * A10)
@@ -152,21 +154,28 @@ class Ant:
             for offy in range(-ANT_FOLLOW_SCENT_RADIUS, ANT_FOLLOW_SCENT_RADIUS + 1):
                 # Calculate distance from the ant to the scent point
                 dist = math.sqrt((offx - dx)**2 + (offy - dy)**2)
-                if dist > 0  and dist <= ANT_FOLLOW_SCENT_RADIUS:
+                if dist > 0 and dist <= ANT_FOLLOW_SCENT_RADIUS:
                     angle = math.degrees(math.atan2(offy - dy, offx - dx))
                     angle = (angle - self.heading) % 360  # Get angle relative to ant heading
                     # Check bounds 
                     if (0 <= ix + offx < WIDTH) and (0 <= iy + offy < HEIGHT):
-                        scent_strength = scent_map[ix + offx, iy + offy]/ (1+dist)
+                        scent_strength = scent_map[ix + offx, iy + offy]/(1+dist)
                         
                         if (0 < angle < 90):
-                            adjust_heading += angle*scent_strength/90
+                            adjust_heading += angle*scent_strength
                             scent_strength_total += scent_strength
                         elif (270 < angle < 360):
-                            adjust_heading -= (360-angle)*scent_strength/90
+                            adjust_heading -= (360-angle)*scent_strength
                             scent_strength_total += scent_strength
-        self.heading += ANT_MAX_TURN_ANGLE*adjust_heading/scent_strength_total if scent_strength_total > 0 else 0
-        self.heading = self.heading % 360  # Normalize heading
+        if scent_strength_total > 0:
+            # Normalize the adjustment based on total scent strength
+            adjust_heading /= scent_strength_total
+            # Limit the adjustment to the maximum turn angle
+            adjust_heading = np.clip(adjust_heading,-ANT_MAX_TURN_ANGLE,ANT_MAX_TURN_ANGLE)
+            # Adjust heading based on the scent strength
+            #print(f"Adjusting heading by {ANT_MAX_TURN_ANGLE*adjust_heading/scent_strength_total} degrees based on scent strength {scent_strength_total}")
+            self.heading = (self.heading + adjust_heading) % 360
+        
             
 
     def find_scent_trail(self, scent_map):
@@ -350,7 +359,7 @@ def main():
         # Update food display
         map = np.zeros((WIDTH, HEIGHT, 3), dtype=np.uint8)
         map[:, :, 0] = 50*find_food  # Red channel
-        map[:, :, 1] = 50*food  # Green channel
+        map[:, :, 1] = 250*food  # Green channel
         map[:, :, 2] = 50*find_nest  # Blue channel
         surf = pygame.surfarray.make_surface(map) 
 
@@ -368,9 +377,9 @@ def main():
             ants.append(Ant())
 
         # Update food and nest scent markers (decay over time)
-        find_food *= 0.995
+        find_food *= 0.998
         find_food[find_food < SCENT_THRESHOLD] = 0
-        find_nest *= 0.995
+        find_nest *= 0.998
         find_nest[find_nest < SCENT_THRESHOLD] = 0
     
         Nfood = np.sum(food)
